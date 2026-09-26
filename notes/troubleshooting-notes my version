@@ -1,0 +1,232 @@
+# Troubleshooting Notes 
+
+## 1. Sysmon Service Verification
+
+Before collecting the network telemetry, the Sysmon service was verified.
+
+Command:
+
+    Get-Service Sysmon64
+
+The service was running.
+
+This check was important because the investigation depended on Sysmon Event ID 3 for network connections and Event ID 1 for process creation.
+
+If Sysmon had not been running, missing telemetry could have been incorrectly interpreted as an absence of activity.
+
+## 2. Large Event Volume
+
+The Event ID 3 query returned a substantial number of network connection records.
+
+Reviewing all events manually would make the investigation inefficient and would make it harder to identify broader communication patterns.
+
+The dataset was therefore reduced in stages:
+
+- Collect the network events.
+- Extract destination values.
+- Group destinations by frequency.
+- Identify a destination requiring deeper analysis.
+- Perform targeted searches on the selected destination.
+
+This approach maintained the original evidence while making detailed review more manageable.
+
+## 3. Destination Extraction
+
+Destination IP addresses were extracted from the Event ID 3 message data.
+
+A pattern similar to the following was used:
+
+    if ($_.Message -match "DestinationIp:\s+([0-9a-fA-F\.:]+)") {
+        $Matches[1]
+    }
+
+The extracted values were then grouped and counted.
+
+This provided a destination-frequency view of the collected network activity.
+
+## 4. Interpreting Frequency Correctly
+
+The analysis identified `8.8.8.8` with 269 observations.
+
+The high count made it a suitable investigation target.
+
+However, the count alone does not establish:
+
+- Malicious intent.
+- Unauthorized access.
+- Command-and-control activity.
+- Which process initiated the connection.
+- Why the destination was contacted.
+
+Frequency was therefore treated as a triage signal rather than as a threat determination.
+
+## 5. Destination Selection
+
+`8.8.8.8` was selected because it had the highest observed frequency in the sample.
+
+This does not mean that the destination was presumed malicious.
+
+The correct interpretation was:
+
+**The destination stood out within the collected telemetry and therefore required contextual review.**
+
+## 6. Targeted Search
+
+A focused search for `8.8.8.8` identified multiple network events across different timestamps.
+
+Examples included:
+
+- `06:08:15`
+- `06:10:53`
+- `06:12:59`
+- `06:13:41`
+- `06:17:16`
+- `06:17:20`
+- `06:19:50`
+- `06:21:55`
+- `06:26:00`
+
+This confirmed repeated communication during the observation period.
+
+The targeted search did not, by itself, identify the responsible process.
+
+## 7. Process Correlation Challenge
+
+Sysmon Event ID 1 was reviewed to identify processes that were active around the network events.
+
+The review included:
+
+- `powershell.exe`
+- `cmd.exe`
+- `wscript.exe`
+- `cscript.exe`
+- `rundll32.exe`
+- `mshta.exe`
+
+Multiple process events were present.
+
+The primary challenge was that the available evidence did not provide sufficient information to directly map a specific process to the `8.8.8.8` connections.
+
+The investigation therefore avoided assigning the network activity to a process solely because it appeared around the same time.
+
+## 8. Avoiding Temporal Correlation Errors
+
+Temporal proximity can help identify candidate relationships, but it is not sufficient for attribution.
+
+For example, the following sequence does not prove process ownership:
+
+    Process starts
+    Network connection occurs shortly afterward
+
+A stronger relationship would require supporting fields such as:
+
+- Matching process ID.
+- Process information within the network event.
+- Exact timestamps.
+- Command-line information.
+- Parent-child process relationships.
+- Destination port.
+- Application ownership.
+
+Without these fields, the correct outcome is to record the correlation as unresolved.
+
+## 9. Wazuh Telemetry Review
+
+Wazuh telemetry was reviewed after the Sysmon analysis.
+
+A process record involving:
+
+`sdbinst.exe`
+
+was available.
+
+The record included:
+
+`C:\Windows\System32\sdbinst.exe`
+
+and:
+
+`8F67CBBD8250CEDA1E5DB21DF87AD870576229B8FD729E80F9092EB578B6915`
+
+The event provided useful endpoint context, but it did not directly establish that the process generated the investigated network traffic.
+
+The Wazuh event was therefore retained as supporting telemetry rather than used as direct attribution.
+
+## 10. Missing Telemetry
+
+A telemetry source not containing a particular event should not automatically be interpreted as proof that the event did not occur.
+
+Potential explanations include:
+
+- Event collection configuration.
+- Filtering.
+- Agent visibility.
+- Indexing limitations.
+- Retention.
+- Timing differences.
+- Unsupported event sources.
+
+For this reason, missing Wazuh network evidence was treated as a visibility limitation rather than as proof that no network activity occurred.
+
+## 11. Evidence Preservation
+
+The investigation used:
+
+    $LabPath = "C:\RareDestinationLab"
+    $EvidencePath = "$LabPath\Evidence"
+
+The primary evidence files were stored under this directory.
+
+Files included:
+
+- `Sysmon-NetworkConnections.txt`
+- `Investigation-Summary.txt`
+
+The raw network output was retained so that derived analysis could be checked against the original telemetry.
+
+## 12. Raw Evidence vs. Derived Results
+
+Destination-frequency counts are derived from the underlying Event ID 3 data.
+
+Because derived results can hide important event-level details, the raw network output was preserved separately.
+
+This makes it possible to:
+
+- Recalculate destination counts.
+- Review individual events.
+- Examine fields not used in the initial analysis.
+- Perform additional correlation later.
+- Validate the original investigative result.
+
+## 13. Evidence vs. Interpretation
+
+The investigation deliberately separated observations from conclusions.
+
+For example:
+
+**Observation:** `8.8.8.8` appeared 269 times in the collected destination data.
+
+**Interpretation:** The destination is prominent in the sampled telemetry and warrants additional review.
+
+The following statement would not be supported by that evidence alone:
+
+**Unsupported conclusion:** The destination is malicious because it appears frequently.
+
+This distinction is central to defensible SOC and DFIR investigations.
+
+## 14. Additional Telemetry That Could Help
+
+The investigation could be strengthened with additional sources such as:
+
+- Windows Filtering Platform telemetry.
+- Firewall logs.
+- Proxy logs.
+- DNS telemetry.
+- Process identifiers.
+- Command-line data.
+- Endpoint detection telemetry.
+- Packet captures.
+- Application-specific logs.
+
+These sources could help identify the responsible process or explain the reason for the communication.
+
